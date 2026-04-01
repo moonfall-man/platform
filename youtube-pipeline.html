@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YouTube Upload Pipeline — System Design Classroom</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-alt: #f7f8fa;
+    --fg: #1a1a1a;
+    --fg-muted: #6b7280;
+    --border: #e2e4e8;
+    --accent: #2563eb;
+    --accent-light: #dbeafe;
+    --accent-fg: #ffffff;
+    --green: #16a34a;
+    --green-bg: #f0fdf4;
+    --green-border: #bbf7d0;
+    --red: #dc2626;
+    --red-bg: #fef2f2;
+    --red-border: #fecaca;
+    --pill-bg: #f1f3f5;
+    --pill-fg: #4b5563;
+    --node-inactive: #d1d5db;
+    --node-inactive-text: #9ca3af;
+    --sim-bg: #f9fafb;
+    --sim-border: #e5e7eb;
+    --badge-bg: #eff6ff;
+    --badge-fg: #1d4ed8;
+    --worker-bg: #f3f4f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1117;
+      --bg-alt: #181a20;
+      --fg: #e5e7eb;
+      --fg-muted: #9ca3af;
+      --border: #2d3039;
+      --accent: #3b82f6;
+      --accent-light: #1e3a5f;
+      --accent-fg: #ffffff;
+      --green: #22c55e;
+      --green-bg: #0a1f0f;
+      --green-border: #166534;
+      --red: #ef4444;
+      --red-bg: #1f0a0a;
+      --red-border: #7f1d1d;
+      --pill-bg: #1f2028;
+      --pill-fg: #9ca3af;
+      --node-inactive: #3f4350;
+      --node-inactive-text: #6b7280;
+      --sim-bg: #13141b;
+      --sim-border: #2d3039;
+      --badge-bg: #1e2a4a;
+      --badge-fg: #60a5fa;
+      --worker-bg: #1a1c24;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+  .container { max-width: 1080px; margin: 0 auto; padding: 24px 20px; }
+  h1 { font-size: 18px; font-weight: 600; margin-bottom: 20px; letter-spacing: -0.3px; }
+  h1 span { color: var(--fg-muted); font-weight: 400; }
+
+  /* === PILL NAV === */
+  .pill-nav {
+    display: flex; gap: 6px; flex-wrap: wrap;
+    margin-bottom: 24px;
+    border-bottom: 0.5px solid var(--border);
+    padding-bottom: 16px;
+  }
+  .pill {
+    font-size: 12px; padding: 5px 12px;
+    border-radius: 100px;
+    background: var(--pill-bg);
+    color: var(--pill-fg);
+    border: 0.5px solid var(--border);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .pill:hover { border-color: var(--accent); color: var(--accent); }
+  .pill.active {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
+  }
+
+  /* === MAIN TWO-COL === */
+  .main { display: grid; grid-template-columns: 220px 1fr; gap: 24px; margin-bottom: 24px; }
+  @media (max-width: 720px) { .main { grid-template-columns: 1fr; } }
+
+  /* === SVG DIAGRAM === */
+  .diagram-col {
+    border: 0.5px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 12px;
+    background: var(--bg-alt);
+  }
+  .diagram-col h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--fg-muted); margin-bottom: 12px; }
+
+  /* === INFO PANEL === */
+  .info-panel { min-width: 0; }
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 100px;
+    background: var(--badge-bg);
+    color: var(--badge-fg);
+    margin-bottom: 10px;
+    letter-spacing: 0.2px;
+  }
+  .info-panel h2 { font-size: 22px; font-weight: 700; margin-bottom: 10px; letter-spacing: -0.4px; }
+  .info-panel p.explain { font-size: 14px; color: var(--fg-muted); margin-bottom: 18px; line-height: 1.7; }
+  .tradeoff-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 520px) { .tradeoff-row { grid-template-columns: 1fr; } }
+  .tradeoff-card {
+    border-radius: 6px;
+    padding: 14px;
+    border: 0.5px solid;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .tradeoff-card.pro { background: var(--green-bg); border-color: var(--green-border); }
+  .tradeoff-card.con { background: var(--red-bg); border-color: var(--red-border); }
+  .tradeoff-card h4 { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+  .tradeoff-card.pro h4 { color: var(--green); }
+  .tradeoff-card.con h4 { color: var(--red); }
+
+  /* === SIMULATION PANEL === */
+  .sim-panel {
+    border: 0.5px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-alt);
+    padding: 18px 20px;
+  }
+  .sim-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
+  .sim-header h3 { font-size: 13px; font-weight: 600; }
+  .sim-area {
+    background: var(--sim-bg);
+    border: 0.5px solid var(--sim-border);
+    border-radius: 6px;
+    min-height: 110px;
+    padding: 16px;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .sim-note {
+    font-size: 11px; color: var(--fg-muted);
+    margin-top: 10px;
+    font-style: italic;
+  }
+
+  /* === BUTTONS === */
+  .btn {
+    font-size: 12px; padding: 6px 16px;
+    border-radius: 6px;
+    border: 0.5px solid var(--border);
+    background: var(--bg);
+    color: var(--fg);
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.12s ease;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  .btn.primary:hover { opacity: 0.9; }
+  .btn.primary:disabled { opacity: 0.4; }
+  .nav-row {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 0.5px solid var(--border);
+  }
+  .nav-row .step-count { font-size: 12px; color: var(--fg-muted); }
+
+  /* === SIMULATION ELEMENTS === */
+  .chunk-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .chunk {
+    width: 40px; height: 28px; border-radius: 4px;
+    border: 0.5px solid var(--border);
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 600; color: var(--fg-muted);
+    opacity: 0;
+    transition: opacity 0.3s, background 0.3s, border-color 0.3s, color 0.3s;
+  }
+  .chunk.visible { opacity: 1; }
+  .chunk.done { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+
+  .gw-flow { display: flex; align-items: center; gap: 8px; }
+  .gw-node {
+    width: 70px; height: 36px; border-radius: 4px;
+    border: 0.5px solid var(--border);
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 500; color: var(--fg-muted);
+    transition: all 0.3s;
+  }
+  .gw-node.lit { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  .gw-arrow { color: var(--node-inactive); font-size: 14px; }
+  .gw-arrow.lit { color: var(--accent); }
+
+  .os-status {
+    font-size: 16px; font-weight: 700; color: var(--fg-muted);
+    transition: color 0.3s;
+  }
+  .os-status.accepted { color: var(--green); }
+
+  .mq-container { display: flex; align-items: center; gap: 16px; width: 100%; }
+  .mq-queue {
+    display: flex; gap: 4px; flex: 1; min-height: 36px;
+    border: 0.5px solid var(--border); border-radius: 4px;
+    padding: 6px; align-items: center; background: var(--bg);
+  }
+  .mq-job {
+    width: 28px; height: 24px; border-radius: 3px;
+    background: var(--accent-light);
+    border: 0.5px solid var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 8px; font-weight: 700; color: var(--accent);
+    transition: all 0.3s;
+  }
+  .mq-job.consumed { opacity: 0.2; }
+  .mq-label { font-size: 10px; color: var(--fg-muted); font-weight: 600; white-space: nowrap; }
+
+  .worker-row { display: flex; gap: 12px; width: 100%; flex-wrap: wrap; justify-content: center; }
+  .worker-box {
+    border: 0.5px solid var(--border); border-radius: 6px;
+    padding: 12px 16px; background: var(--worker-bg);
+    text-align: center; min-width: 100px; flex: 1; max-width: 160px;
+  }
+  .worker-box .res { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .worker-box .wstatus {
+    font-size: 10px; font-weight: 600; padding: 2px 8px;
+    border-radius: 100px; display: inline-block;
+    background: var(--pill-bg); color: var(--fg-muted);
+    transition: all 0.3s;
+  }
+  .worker-box .wstatus.encoding { background: var(--accent-light); color: var(--accent); }
+  .worker-box .wstatus.done { background: var(--green-bg); color: var(--green); border: 0.5px solid var(--green-border); }
+  .worker-box .wbar {
+    height: 4px; border-radius: 2px; background: var(--border);
+    margin-top: 8px; overflow: hidden;
+  }
+  .worker-box .wbar-fill {
+    height: 100%; width: 0; background: var(--accent);
+    border-radius: 2px; transition: width 0.1s linear;
+  }
+  .worker-box .wbar-fill.done-bar { background: var(--green); }
+
+  .cdn-slots { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  .cdn-slot {
+    width: 72px; height: 48px; border-radius: 4px;
+    border: 0.5px solid var(--border); background: var(--bg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 600; color: var(--fg-muted);
+    transition: all 0.3s;
+  }
+  .cdn-slot .cdn-label { font-size: 8px; font-weight: 400; margin-top: 2px; }
+  .cdn-slot.hit { background: var(--green-bg); border-color: var(--green-border); color: var(--green); }
+  .cdn-slot.miss { background: var(--red-bg); border-color: var(--red-border); color: var(--red); }
+  .cdn-slot.fill { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
+  .cdn-msg { font-size: 12px; font-weight: 600; margin-left: 12px; min-width: 120px; }
+
+  /* === OVERVIEW === */
+  .overview-layout { display: block; }
+  .overview-layout .diagram-col { display: none; }
+  .overview-layout .info-panel { width: 100%; }
+
+  .ov-flowchart {
+    width: 100%; border: 0.5px solid var(--border);
+    border-radius: 8px; background: var(--bg-alt);
+    padding: 20px 12px; margin-bottom: 16px;
+  }
+  .ov-flowchart svg { width: 100%; display: block; }
+  .ov-flowchart svg .fc-node { cursor: pointer; }
+  .ov-flowchart svg .fc-node rect { transition: fill 0.15s, stroke 0.15s; }
+  .ov-flowchart svg .fc-node:hover rect { fill: var(--accent); stroke: var(--accent); }
+  .ov-flowchart svg .fc-node:hover .fc-title { fill: var(--accent-fg); }
+  .ov-flowchart svg .fc-node:hover .fc-concept { fill: var(--accent-fg); opacity: 0.8; }
+  .ov-flowchart svg .fc-node:hover .fc-num { fill: var(--accent-fg); }
+
+  .ov-detail-bar {
+    border: 0.5px solid var(--border); border-radius: 6px;
+    background: var(--bg-alt); padding: 14px 18px;
+    margin-bottom: 0; min-height: 52px;
+    display: flex; align-items: flex-start; gap: 16px;
+    transition: border-color 0.2s;
+  }
+  .ov-detail-bar.has-selection { border-color: var(--accent); }
+  .ov-detail-bar .ov-detail-prompt { font-size: 13px; color: var(--fg-muted); line-height: 1.6; }
+  .ov-detail-bar .ov-detail-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 24px; height: 24px; border-radius: 100px;
+    background: var(--accent); color: var(--accent-fg);
+    font-size: 12px; font-weight: 700; flex-shrink: 0; margin-top: 1px;
+  }
+  .ov-detail-bar .ov-detail-content { flex: 1; min-width: 0; }
+  .ov-detail-bar .ov-detail-title { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+  .ov-detail-bar .ov-detail-concept { font-size: 11px; color: var(--badge-fg); font-weight: 600; }
+  .ov-detail-bar .ov-detail-desc { font-size: 13px; color: var(--fg-muted); margin-top: 6px; line-height: 1.6; }
+  .ov-detail-bar .ov-detail-link {
+    font-size: 12px; color: var(--accent); cursor: pointer; margin-top: 6px;
+    display: inline-block; font-weight: 600;
+  }
+  .ov-detail-bar .ov-detail-link:hover { text-decoration: underline; }
+
+  .ov-e2e-flow { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: center; width: 100%; }
+  .ov-e2e-node {
+    padding: 6px 10px; border-radius: 4px; font-size: 10px; font-weight: 600;
+    border: 0.5px solid var(--border); background: var(--bg);
+    color: var(--fg-muted); transition: all 0.3s; white-space: nowrap;
+  }
+  .ov-e2e-node.lit { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  .ov-e2e-node.done { background: var(--green-bg); border-color: var(--green-border); color: var(--green); }
+  .ov-e2e-arrow { color: var(--node-inactive); font-size: 12px; transition: color 0.3s; }
+  .ov-e2e-arrow.lit { color: var(--accent); }
+  .ov-e2e-status { font-size: 12px; font-weight: 600; color: var(--fg-muted); margin-left: 8px; width: 100%; text-align: center; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Video Upload Pipeline <span>— System Design</span></h1>
+
+  <div class="pill-nav" id="pillNav"></div>
+
+  <div class="main">
+    <div class="diagram-col">
+      <h3>Pipeline</h3>
+      <svg id="pipelineSvg" viewBox="0 0 196 460" xmlns="http://www.w3.org/2000/svg" width="100%"></svg>
+    </div>
+    <div class="info-panel" id="infoPanel"></div>
+  </div>
+
+  <div class="sim-panel">
+    <div class="sim-header">
+      <h3 id="simTitle">Simulation</h3>
+      <button class="btn primary" id="runBtn" onclick="runSim()">Run simulation</button>
+    </div>
+    <div class="sim-area" id="simArea"></div>
+    <div class="sim-note" id="simNote"></div>
+  </div>
+
+  <div class="nav-row">
+    <button class="btn" id="prevBtn" onclick="go(-1)">← Previous</button>
+    <span class="step-count" id="stepCount"></span>
+    <button class="btn" id="nextBtn" onclick="go(1)">Next →</button>
+  </div>
+</div>
+
+<script>
+const STEPS = [
+  {
+    id: 'upload', title: 'User Upload', pill: 'Upload',
+    concept: 'Resumable Uploads',
+    explain: 'Large video files are split into fixed-size chunks (typically 8–16 MB) and uploaded independently. If the connection drops, the client asks the server which chunks arrived and resumes from there — no full restart needed. Google\'s resumable upload protocol issues a session URI; the client PUTs byte ranges against it.',
+    pro: 'Users on spotty connections can upload multi-GB files without losing progress. The server can begin processing partial data before the full file arrives.',
+    con: 'The server must track per-session state (offset, expiry) — adding storage and cleanup complexity. Chunk reassembly and integrity checks (MD5/CRC) add CPU overhead.',
+    simNote: 'Each chunk arrives independently. A dropped connection resumes from the last acknowledged chunk.'
+  },
+  {
+    id: 'gateway', title: 'API Gateway', pill: 'Gateway',
+    concept: 'Rate Limiting + Auth',
+    explain: 'Every request first hits an API gateway that verifies the OAuth token, checks quotas (token-bucket or sliding-window rate limiter), and routes to the correct backend service. This layer sheds abusive traffic before it reaches expensive downstream systems.',
+    pro: 'Centralises cross-cutting concerns (auth, rate limiting, logging) in one place, keeping backend services simple and focused on business logic.',
+    con: 'The gateway becomes a single logical chokepoint. If misconfigured, legitimate users get throttled. Adding latency to every request path.',
+    simNote: 'A request lights up each gateway stage: Auth → Rate Limit → Route → Backend.'
+  },
+  {
+    id: 'store', title: 'Object Store', pill: 'Object Store',
+    concept: 'Write-Ahead + Async',
+    explain: 'Once the gateway accepts the upload, raw bytes are written to a durable blob store (like GCS / S3). A write-ahead log entry is created before the write so the system can recover from partial failures. The HTTP response returns 202 Accepted immediately — actual processing happens asynchronously.',
+    pro: 'Decouples ingestion speed from processing speed. The user gets a fast acknowledgment while heavy work (transcoding, thumbnailing) proceeds in the background.',
+    con: 'The user sees "processing" for minutes to hours. If the async pipeline stalls, the gap between "accepted" and "available" grows, creating a poor experience.',
+    simNote: 'Data flows through the write-ahead log, into storage, then returns 202 Accepted without waiting for processing.'
+  },
+  {
+    id: 'queue', title: 'Message Queue', pill: 'Queue',
+    concept: 'Async Job Queues',
+    explain: 'After the blob lands in storage, a job message is enqueued (Kafka / Pub-Sub / SQS). The queue guarantees at-least-once delivery: even if a worker crashes, the message re-appears after a visibility timeout. Consumers pull work at their own pace, decoupling producers from consumers.',
+    pro: 'Absorbs traffic spikes naturally — a burst of uploads just deepens the queue without back-pressuring the API. Workers scale independently.',
+    con: 'At-least-once semantics mean workers must be idempotent — processing the same job twice must not corrupt data. Queue lag becomes a new metric to monitor.',
+    simNote: 'Jobs fill the queue from the left. Workers consume from the right. If a worker fails, the job returns to the queue.'
+  },
+  {
+    id: 'workers', title: 'Transcoding Workers', pill: 'Workers',
+    concept: 'Horizontal Scaling',
+    explain: 'A pool of stateless workers pulls jobs from the queue and transcodes the raw video into multiple resolutions (360p, 720p, 1080p, 4K) and codecs (H.264, VP9, AV1). Because workers are stateless, you can add or remove them elastically based on queue depth.',
+    pro: 'Linearly scales throughput by adding machines. Each resolution is an independent job — they run in parallel, so total time equals the slowest single transcode, not the sum.',
+    con: 'Compute is expensive (CPU/GPU-heavy). Cold-start latency when auto-scaling up. Coordinating "all renditions done" requires a fan-out/fan-in pattern.',
+    simNote: 'Three workers encode simultaneously. Total wall-clock time = the slowest worker, not the sum of all three.'
+  },
+  {
+    id: 'cdn', title: 'CDN Delivery', pill: 'CDN',
+    concept: 'Caching + Edge Delivery',
+    explain: 'Finished renditions are pushed to a Content Delivery Network with points-of-presence worldwide. The first viewer request is a cache miss — the edge fetches from origin, caches it, and all subsequent viewers in that region get a cache hit served in milliseconds. TTLs and cache invalidation handle updates.',
+    pro: 'Viewers anywhere in the world get low-latency playback. Origin servers see dramatically less traffic because the edge absorbs the read load.',
+    con: 'Cache invalidation is notoriously hard ("the two hard problems in CS"). Stale content can be served until TTL expires. Storage costs multiply across hundreds of edge locations.',
+    simNote: 'Edge cache slots cycle through MISS → FILL → HIT. After filling, subsequent requests are served instantly.'
+  }
+];
+
+let current = -1; // -1 = overview
+let simRunning = false;
+let simTimers = [];
+
+function clearTimers() { simTimers.forEach(t => clearTimeout(t)); simTimers = []; simRunning = false; }
+
+function isOverview() { return current === -1; }
+
+function render() {
+  clearTimers();
+  const mainEl = document.querySelector('.main');
+
+  // Pills
+  document.getElementById('pillNav').innerHTML =
+    `<div class="pill${isOverview() ? ' active' : ''}" onclick="goTo(-1)">Overview</div>` +
+    STEPS.map((st, i) =>
+      `<div class="pill${i === current ? ' active' : ''}" onclick="goTo(${i})">${st.pill}</div>`
+    ).join('');
+
+  if (isOverview()) {
+    mainEl.classList.add('overview-layout');
+    mainEl.style.display = 'block';
+    document.getElementById('pipelineSvg').parentElement.style.display = 'none';
+
+    const summaries = [
+      'Large files split into chunks with resume support — no restarts on failure',
+      'Centralised auth + token-bucket rate limiter shields downstream services',
+      'Durable blob write with WAL; returns 202 Accepted immediately',
+      'At-least-once delivery via Kafka/SQS decouples ingestion from processing',
+      'Stateless workers transcode in parallel — wall time = slowest job',
+      'Edge PoPs cache renditions globally; first miss fills, then all hits'
+    ];
+    const icons = ['↑','⚡','💾','📨','⚙','🌐'];
+    const concepts = STEPS.map(s => s.concept);
+
+    // Build SVG flowchart
+    const bw = 150, bh = 64, gapX = 30, gapY = 24;
+    const cols = 3, rows = 2;
+    const padX = 16, padY = 16;
+    const svgW = cols * bw + (cols - 1) * gapX + padX * 2;
+    const svgH = rows * bh + (rows - 1) * gapY + padY * 2 + 20; // +20 for arrows
+
+    let svgContent = '';
+    const positions = [];
+    for (let i = 0; i < 6; i++) {
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+      const x = padX + col * (bw + gapX);
+      const y = padY + row * (bh + gapY + 20);
+      positions.push({ x, y, cx: x + bw / 2, cy: y + bh / 2 });
+    }
+
+    // Draw connector arrows
+    for (let i = 0; i < 5; i++) {
+      const from = positions[i];
+      const to = positions[i + 1];
+      if (Math.floor(i / cols) === Math.floor((i + 1) / cols)) {
+        // Same row — horizontal arrow
+        const x1 = from.x + bw + 2;
+        const x2 = to.x - 2;
+        const y = from.cy;
+        svgContent += `<line x1="${x1}" y1="${y}" x2="${x2 - 5}" y2="${y}" stroke="var(--border)" stroke-width="1"/>`;
+        svgContent += `<polygon points="${x2 - 7},${y - 4} ${x2 - 7},${y + 4} ${x2},${y}" fill="var(--border)"/>`;
+      } else {
+        // Different row — vertical down from end of row to start of next row
+        const x1 = from.cx;
+        const y1 = from.y + bh + 2;
+        const x2 = to.cx;
+        const y2 = to.y - 2;
+        // L-shaped connector
+        const midY = y1 + (y2 - y1) / 2;
+        svgContent += `<path d="M${x1},${y1} L${x1},${midY} L${x2},${midY} L${x2},${y2 - 5}" stroke="var(--border)" stroke-width="1" fill="none"/>`;
+        svgContent += `<polygon points="${x2 - 4},${y2 - 7} ${x2 + 4},${y2 - 7} ${x2},${y2}" fill="var(--border)"/>`;
+      }
+    }
+
+    // Draw nodes
+    for (let i = 0; i < 6; i++) {
+      const p = positions[i];
+      svgContent += `<g class="fc-node" onclick="ovSelect(${i})" data-idx="${i}">
+        <rect x="${p.x}" y="${p.y}" width="${bw}" height="${bh}" rx="6"
+          fill="var(--node-inactive)" stroke="var(--border)" stroke-width="0.5"/>
+        <text class="fc-num" x="${p.x + 12}" y="${p.y + 18}" font-size="10" font-weight="700"
+          fill="var(--node-inactive-text)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">${icons[i]}</text>
+        <text class="fc-title" x="${p.x + 24}" y="${p.y + 18}" font-size="11" font-weight="700"
+          fill="var(--node-inactive-text)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">${STEPS[i].title}</text>
+        <text class="fc-concept" x="${p.x + bw / 2}" y="${p.y + 38}" text-anchor="middle" font-size="9" font-weight="500"
+          fill="var(--node-inactive-text)" opacity="0.7" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">${concepts[i]}</text>
+        <text x="${p.x + bw / 2}" y="${p.y + 54}" text-anchor="middle" font-size="10" font-weight="600"
+          fill="var(--node-inactive-text)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">${i + 1} / 6</text>
+      </g>`;
+    }
+
+    document.getElementById('infoPanel').innerHTML = `
+      <div class="badge">End-to-End Architecture</div>
+      <h2>Pipeline Overview</h2>
+      <p class="explain" style="margin-bottom:14px">Click any stage in the flowchart to preview it, or double-click to jump into the deep dive.</p>
+      <div class="ov-flowchart">
+        <svg viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg" id="ovFlowSvg"></svg>
+      </div>
+      <div class="ov-detail-bar" id="ovDetailBar">
+        <div class="ov-detail-prompt">Click a stage above to see details here</div>
+      </div>
+    `;
+    document.getElementById('ovFlowSvg').innerHTML = svgContent;
+
+    // Wire up double-click
+    document.querySelectorAll('.fc-node').forEach(node => {
+      node.addEventListener('dblclick', () => { goTo(parseInt(node.dataset.idx)); });
+    });
+
+    // Store summaries on window for ovSelect
+    window._ovSummaries = summaries;
+
+    // Sim
+    document.getElementById('simTitle').textContent = 'Simulation — End-to-End Flow';
+    document.getElementById('simNote').textContent = 'Watch a video flow through all six pipeline stages sequentially.';
+    document.getElementById('simArea').innerHTML = buildSimHTML(-1);
+    document.getElementById('runBtn').disabled = false;
+
+    // Nav
+    document.getElementById('prevBtn').disabled = true;
+    document.getElementById('nextBtn').disabled = false;
+    document.getElementById('stepCount').textContent = 'Overview';
+    return;
+  }
+
+  // Normal step view
+  mainEl.classList.remove('overview-layout');
+  mainEl.style.display = '';
+  document.getElementById('pipelineSvg').parentElement.style.display = '';
+  const s = STEPS[current];
+
+  // SVG pipeline
+  renderPipeline();
+
+  // Info panel
+  document.getElementById('infoPanel').innerHTML = `
+    <div class="badge">${s.concept}</div>
+    <h2>${s.title}</h2>
+    <p class="explain">${s.explain}</p>
+    <div class="tradeoff-row">
+      <div class="tradeoff-card pro"><h4>✓ Why it works</h4>${s.pro}</div>
+      <div class="tradeoff-card con"><h4>✗ The tradeoff</h4>${s.con}</div>
+    </div>
+  `;
+
+  // Sim
+  document.getElementById('simTitle').textContent = `Simulation — ${s.title}`;
+  document.getElementById('simNote').textContent = s.simNote;
+  document.getElementById('simArea').innerHTML = buildSimHTML(current);
+  document.getElementById('runBtn').disabled = false;
+
+  // Nav
+  document.getElementById('prevBtn').disabled = false;
+  document.getElementById('nextBtn').disabled = current === STEPS.length - 1;
+  document.getElementById('stepCount').textContent = `${current + 1} / ${STEPS.length}`;
+}
+
+function renderPipeline() {
+  const svg = document.getElementById('pipelineSvg');
+  const labels = ['User Upload','API Gateway','Object Store','Msg Queue','Workers','CDN'];
+  const icons = ['↑','⚡','💾','📨','⚙','🌐'];
+  let html = '';
+  const yStart = 16, gap = 76, boxW = 164, boxH = 44, cx = 98;
+  for (let i = 0; i < 6; i++) {
+    const y = yStart + i * gap;
+    const active = i === current;
+    const fill = active ? 'var(--accent)' : 'var(--node-inactive)';
+    const textFill = active ? 'var(--accent-fg)' : 'var(--node-inactive-text)';
+    const strokeW = active ? 1.5 : 0.5;
+    html += `<rect x="${cx - boxW/2}" y="${y}" width="${boxW}" height="${boxH}" rx="6"
+      fill="${fill}" stroke="${active ? 'var(--accent)' : 'var(--border)'}" stroke-width="${strokeW}"/>`;
+    html += `<text x="${cx}" y="${y + 27}" text-anchor="middle"
+      font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif"
+      font-size="12" font-weight="${active ? 700 : 500}" fill="${textFill}">${icons[i]} ${labels[i]}</text>`;
+    if (i < 5) {
+      const ay = y + boxH + 4;
+      html += `<line x1="${cx}" y1="${ay}" x2="${cx}" y2="${ay + gap - boxH - 8}"
+        stroke="${i === current || i + 1 === current ? 'var(--accent)' : 'var(--border)'}"
+        stroke-width="0.5" stroke-dasharray="${i === current || i + 1 === current ? 'none' : '3,3'}"/>`;
+      html += `<polygon points="${cx - 4},${ay + gap - boxH - 12} ${cx + 4},${ay + gap - boxH - 12} ${cx},${ay + gap - boxH - 6}"
+        fill="${i === current || i + 1 === current ? 'var(--accent)' : 'var(--border)'}"/>`;
+    }
+  }
+  svg.innerHTML = html;
+}
+
+function buildSimHTML(step) {
+  if (step === -1) {
+    const names = ['Upload','Gateway','Object Store','Queue','Workers','CDN'];
+    return `<div class="ov-e2e-flow">
+      ${names.map((n, i) =>
+        `<div class="ov-e2e-node" id="oe${i}">${n}</div>${i < 5 ? '<span class="ov-e2e-arrow" id="oea'+i+'">→</span>' : ''}`
+      ).join('')}
+      <div class="ov-e2e-status" id="oeStatus">Ready</div>
+    </div>`;
+  }
+  switch(step) {
+    case 0: // Upload chunks
+      return `<div class="chunk-row">${Array.from({length:8}, (_,i) =>
+        `<div class="chunk" id="ch${i}">${i+1}</div>`).join('')}
+        <span style="font-size:11px;color:var(--fg-muted);margin-left:8px" id="uploadStatus">Ready</span></div>`;
+    case 1: // Gateway
+      return `<div class="gw-flow">
+        <div class="gw-node" id="gw0">Auth</div><span class="gw-arrow" id="ga0">→</span>
+        <div class="gw-node" id="gw1">Rate Limit</div><span class="gw-arrow" id="ga1">→</span>
+        <div class="gw-node" id="gw2">Route</div><span class="gw-arrow" id="ga2">→</span>
+        <div class="gw-node" id="gw3">Backend</div>
+        <span style="font-size:11px;color:var(--fg-muted);margin-left:8px" id="gwStatus">Ready</span></div>`;
+    case 2: // Object store
+      return `<div class="gw-flow">
+        <div class="gw-node" id="os0">WAL Write</div><span class="gw-arrow" id="oa0">→</span>
+        <div class="gw-node" id="os1">Blob Store</div><span class="gw-arrow" id="oa1">→</span>
+        <div class="gw-node" id="os2" style="min-width:90px">Response</div>
+        <span class="os-status" id="osStatus" style="margin-left:12px">…</span></div>`;
+    case 3: // Queue
+      return `<div class="mq-container">
+        <span class="mq-label">Producer →</span>
+        <div class="mq-queue" id="mqQueue"></div>
+        <span class="mq-label">→ Consumer</span>
+        <span style="font-size:11px;color:var(--fg-muted)" id="mqStatus">Ready</span></div>`;
+    case 4: // Workers
+      return `<div class="worker-row">
+        ${['360p','720p','1080p'].map((r,i) => `<div class="worker-box" id="wk${i}">
+          <div class="res">${r}</div>
+          <span class="wstatus" id="ws${i}">idle</span>
+          <div class="wbar"><div class="wbar-fill" id="wb${i}"></div></div>
+        </div>`).join('')}
+      </div>`;
+    case 5: // CDN
+      return `<div class="cdn-slots">
+        ${['Edge-US','Edge-EU','Edge-Asia'].map((r,i) => `<div class="cdn-slot" id="cdn${i}">
+          ${r}<span class="cdn-label">—</span>
+        </div>`).join('')}
+        <span class="cdn-msg" id="cdnMsg">Ready</span></div>`;
+  }
+}
+
+function runSim() {
+  clearTimers();
+  simRunning = true;
+  document.getElementById('runBtn').disabled = true;
+  document.getElementById('simArea').innerHTML = buildSimHTML(current);
+
+  switch(current) {
+    case -1: simOverview(); break;
+    case 0: simUpload(); break;
+    case 1: simGateway(); break;
+    case 2: simObjectStore(); break;
+    case 3: simQueue(); break;
+    case 4: simWorkers(); break;
+    case 5: simCDN(); break;
+  }
+}
+
+function ovSelect(idx) {
+  // Highlight the selected node in the SVG
+  document.querySelectorAll('.fc-node rect').forEach((r, i) => {
+    if (i === idx) {
+      r.setAttribute('fill', 'var(--accent)');
+      r.setAttribute('stroke', 'var(--accent)');
+      r.setAttribute('stroke-width', '1.5');
+    } else {
+      r.setAttribute('fill', 'var(--node-inactive)');
+      r.setAttribute('stroke', 'var(--border)');
+      r.setAttribute('stroke-width', '0.5');
+    }
+  });
+  document.querySelectorAll('.fc-node .fc-title').forEach((t, i) => {
+    t.setAttribute('fill', i === idx ? 'var(--accent-fg)' : 'var(--node-inactive-text)');
+  });
+  document.querySelectorAll('.fc-node .fc-concept').forEach((t, i) => {
+    t.setAttribute('fill', i === idx ? 'var(--accent-fg)' : 'var(--node-inactive-text)');
+  });
+  document.querySelectorAll('.fc-node .fc-num').forEach((t, i) => {
+    t.setAttribute('fill', i === idx ? 'var(--accent-fg)' : 'var(--node-inactive-text)');
+  });
+  // Also update the step counter texts
+  document.querySelectorAll('.fc-node').forEach((g, i) => {
+    const texts = g.querySelectorAll('text');
+    if (texts[3]) texts[3].setAttribute('fill', i === idx ? 'var(--accent-fg)' : 'var(--node-inactive-text)');
+  });
+
+  // Update detail bar
+  const s = STEPS[idx];
+  const bar = document.getElementById('ovDetailBar');
+  bar.classList.add('has-selection');
+  bar.innerHTML = `
+    <span class="ov-detail-num">${idx + 1}</span>
+    <div class="ov-detail-content">
+      <div class="ov-detail-title">${s.title}</div>
+      <div class="ov-detail-concept">${s.concept}</div>
+      <div class="ov-detail-desc">${window._ovSummaries[idx]}</div>
+      <span class="ov-detail-link" onclick="goTo(${idx})">Deep dive →</span>
+    </div>
+  `;
+}
+
+function simOverview() {
+  const names = ['Chunking file…','Authenticating…','Writing to blob store…','Enqueuing jobs…','Transcoding…','Pushing to CDN…'];
+  const doneNames = ['Chunks sent ✓','Auth passed ✓','Blob stored ✓','Jobs queued ✓','Encoded ✓','Cached globally ✓'];
+  for (let i = 0; i < 6; i++) {
+    // Light up node
+    simTimers.push(setTimeout(() => {
+      const node = document.getElementById(`oe${i}`);
+      const status = document.getElementById('oeStatus');
+      if (node) { node.classList.add('lit'); }
+      if (i > 0) {
+        const arrow = document.getElementById(`oea${i-1}`);
+        if (arrow) arrow.classList.add('lit');
+      }
+      if (status) status.textContent = names[i];
+    }, i * 900));
+    // Mark done
+    simTimers.push(setTimeout(() => {
+      const node = document.getElementById(`oe${i}`);
+      const status = document.getElementById('oeStatus');
+      if (node) { node.classList.remove('lit'); node.classList.add('done'); }
+      if (i === 5 && status) status.textContent = '✓ Video is live — end-to-end complete';
+    }, i * 900 + 600));
+  }
+}
+
+function simUpload() {
+  const status = document.getElementById('uploadStatus');
+  for (let i = 0; i < 8; i++) {
+    simTimers.push(setTimeout(() => {
+      const c = document.getElementById(`ch${i}`);
+      if (!c) return;
+      c.classList.add('visible');
+      status.textContent = `Uploading chunk ${i+1}/8…`;
+      simTimers.push(setTimeout(() => {
+        c.classList.add('done');
+        if (i === 7) status.textContent = '✓ Upload complete — all chunks received';
+      }, 200));
+    }, i * 350));
+  }
+}
+
+function simGateway() {
+  const ids = ['gw0','ga0','gw1','ga1','gw2','ga2','gw3'];
+  const status = document.getElementById('gwStatus');
+  const labels = ['Verifying token…','','Checking quota…','','Routing…','','✓ 200 OK'];
+  ids.forEach((id, i) => {
+    simTimers.push(setTimeout(() => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('lit');
+      if (labels[i]) status.textContent = labels[i];
+    }, i * 400));
+  });
+}
+
+function simObjectStore() {
+  const nodes = ['os0','oa0','os1','oa1','os2'];
+  const labels = ['Writing WAL entry…','','Persisting blob…','',''];
+  const status = document.getElementById('osStatus');
+  nodes.forEach((id, i) => {
+    simTimers.push(setTimeout(() => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('lit');
+      if (labels[i]) status.textContent = labels[i];
+      if (i === nodes.length - 1) {
+        status.textContent = '202 Accepted';
+        status.classList.add('accepted');
+      }
+    }, i * 500));
+  });
+}
+
+function simQueue() {
+  const queue = document.getElementById('mqQueue');
+  const status = document.getElementById('mqStatus');
+  const jobCount = 6;
+  // Fill
+  for (let i = 0; i < jobCount; i++) {
+    simTimers.push(setTimeout(() => {
+      const j = document.createElement('div');
+      j.className = 'mq-job';
+      j.id = `mj${i}`;
+      j.textContent = `J${i+1}`;
+      queue.appendChild(j);
+      status.textContent = `Enqueued ${i+1}/${jobCount}`;
+    }, i * 250));
+  }
+  // Drain
+  for (let i = 0; i < jobCount; i++) {
+    simTimers.push(setTimeout(() => {
+      const j = document.getElementById(`mj${i}`);
+      if (j) j.classList.add('consumed');
+      status.textContent = `Worker consumed J${i+1}`;
+      if (i === jobCount - 1) status.textContent = '✓ Queue drained';
+    }, jobCount * 250 + 500 + i * 350));
+  }
+}
+
+function simWorkers() {
+  const durations = [2000, 3200, 4500]; // 360p fastest, 1080p slowest
+  const maxDur = Math.max(...durations);
+  for (let i = 0; i < 3; i++) {
+    const ws = document.getElementById(`ws${i}`);
+    const wb = document.getElementById(`wb${i}`);
+    if (!ws || !wb) continue;
+    ws.textContent = 'encoding…';
+    ws.classList.add('encoding');
+    // Animate bar
+    const start = performance.now();
+    const dur = durations[i];
+    function tick() {
+      const elapsed = performance.now() - start;
+      const pct = Math.min(elapsed / dur, 1);
+      wb.style.width = (pct * 100) + '%';
+      if (pct < 1 && simRunning) {
+        requestAnimationFrame(tick);
+      } else if (pct >= 1) {
+        ws.textContent = 'done ✓';
+        ws.classList.remove('encoding');
+        ws.classList.add('done');
+        wb.classList.add('done-bar');
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+}
+
+function simCDN() {
+  const sequence = [
+    { slot: 0, state: 'miss', label: 'MISS', msg: 'Edge-US: cache miss → fetch from origin' },
+    { slot: 0, state: 'fill', label: 'FILL', msg: 'Edge-US: caching response…' },
+    { slot: 0, state: 'hit', label: 'HIT', msg: 'Edge-US: serving from cache — 12ms' },
+    { slot: 1, state: 'miss', label: 'MISS', msg: 'Edge-EU: cache miss → fetch from origin' },
+    { slot: 1, state: 'fill', label: 'FILL', msg: 'Edge-EU: caching response…' },
+    { slot: 1, state: 'hit', label: 'HIT', msg: 'Edge-EU: serving from cache — 8ms' },
+    { slot: 2, state: 'miss', label: 'MISS', msg: 'Edge-Asia: cache miss → fetch from origin' },
+    { slot: 2, state: 'fill', label: 'FILL', msg: 'Edge-Asia: caching response…' },
+    { slot: 2, state: 'hit', label: 'HIT', msg: 'Edge-Asia: serving from cache — 15ms' },
+    { slot: -1, state: '', label: '', msg: '✓ All edges warm — global low-latency delivery' },
+  ];
+  const msg = document.getElementById('cdnMsg');
+  sequence.forEach((s, i) => {
+    simTimers.push(setTimeout(() => {
+      if (s.slot >= 0) {
+        const el = document.getElementById(`cdn${s.slot}`);
+        if (!el) return;
+        el.className = `cdn-slot ${s.state}`;
+        el.querySelector('.cdn-label').textContent = s.label;
+      }
+      msg.textContent = s.msg;
+    }, i * 600));
+  });
+}
+
+function goTo(i) { current = i; render(); }
+function go(d) { current = Math.max(-1, Math.min(STEPS.length - 1, current + d)); render(); }
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' && current < STEPS.length - 1) go(1);
+  if (e.key === 'ArrowLeft' && current > -1) go(-1);
+});
+
+render();
+</script>
+</body>
+</html>
