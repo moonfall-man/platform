@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ride-sharing Dispatch Pipeline — System Design Classroom</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-alt: #f7f8fa;
+    --fg: #1a1a1a;
+    --fg-muted: #6b7280;
+    --border: #e2e4e8;
+    --accent: #2563eb;
+    --accent-light: #dbeafe;
+    --accent-fg: #ffffff;
+    --green: #16a34a;
+    --green-bg: #f0fdf4;
+    --green-border: #bbf7d0;
+    --red: #dc2626;
+    --red-bg: #fef2f2;
+    --red-border: #fecaca;
+    --pill-bg: #f1f3f5;
+    --pill-fg: #4b5563;
+    --node-inactive: #d1d5db;
+    --node-inactive-text: #9ca3af;
+    --sim-bg: #f9fafb;
+    --sim-border: #e5e7eb;
+    --badge-bg: #eff6ff;
+    --badge-fg: #1d4ed8;
+    --worker-bg: #f3f4f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1117;
+      --bg-alt: #181a20;
+      --fg: #e5e7eb;
+      --fg-muted: #9ca3af;
+      --border: #2d3039;
+      --accent: #3b82f6;
+      --accent-light: #1e3a5f;
+      --accent-fg: #ffffff;
+      --green: #22c55e;
+      --green-bg: #0a1f0f;
+      --green-border: #166534;
+      --red: #ef4444;
+      --red-bg: #1f0a0a;
+      --red-border: #7f1d1d;
+      --pill-bg: #1f2028;
+      --pill-fg: #9ca3af;
+      --node-inactive: #3f4350;
+      --node-inactive-text: #6b7280;
+      --sim-bg: #13141b;
+      --sim-border: #2d3039;
+      --badge-bg: #1e2a4a;
+      --badge-fg: #60a5fa;
+      --worker-bg: #1a1c24;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+  .container { max-width: 1080px; margin: 0 auto; padding: 24px 20px; }
+  h1 { font-size: 18px; font-weight: 600; margin-bottom: 20px; letter-spacing: -0.3px; }
+  h1 span { color: var(--fg-muted); font-weight: 400; }
+
+  /* === PILL NAV === */
+  .pill-nav {
+    display: flex; gap: 6px; flex-wrap: wrap;
+    margin-bottom: 24px;
+    border-bottom: 0.5px solid var(--border);
+    padding-bottom: 16px;
+  }
+  .pill {
+    font-size: 12px; padding: 5px 12px;
+    border-radius: 100px;
+    background: var(--pill-bg);
+    color: var(--pill-fg);
+    border: 0.5px solid var(--border);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .pill:hover { border-color: var(--accent); color: var(--accent); }
+  .pill.active {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
+  }
+
+  /* === MAIN TWO-COL === */
+  .main { display: grid; grid-template-columns: 220px 1fr; gap: 24px; margin-bottom: 24px; }
+  @media (max-width: 720px) { .main { grid-template-columns: 1fr; } }
+
+  /* === SVG DIAGRAM === */
+  .diagram-col {
+    border: 0.5px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 12px;
+    background: var(--bg-alt);
+  }
+  .diagram-col h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--fg-muted); margin-bottom: 12px; }
+
+  /* === INFO PANEL === */
+  .info-panel { min-width: 0; }
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 100px;
+    background: var(--badge-bg);
+    color: var(--badge-fg);
+    margin-bottom: 10px;
+    letter-spacing: 0.2px;
+  }
+  .info-panel h2 { font-size: 22px; font-weight: 700; margin-bottom: 10px; letter-spacing: -0.4px; }
+  .info-panel p.explain { font-size: 14px; color: var(--fg-muted); margin-bottom: 18px; line-height: 1.7; }
+  .tradeoff-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 520px) { .tradeoff-row { grid-template-columns: 1fr; } }
+  .tradeoff-card {
+    border-radius: 6px;
+    padding: 14px;
+    border: 0.5px solid;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .tradeoff-card.pro { background: var(--green-bg); border-color: var(--green-border); }
+  .tradeoff-card.con { background: var(--red-bg); border-color: var(--red-border); }
+  .tradeoff-card h4 { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+  .tradeoff-card.pro h4 { color: var(--green); }
+  .tradeoff-card.con h4 { color: var(--red); }
+
+  /* === SIMULATION PANEL === */
+  .sim-panel {
+    border: 0.5px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-alt);
+    padding: 18px 20px;
+  }
+  .sim-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
+  .sim-header h3 { font-size: 13px; font-weight: 600; }
+  .sim-area {
+    background: var(--sim-bg);
+    border: 0.5px solid var(--sim-border);
+    border-radius: 6px;
+    min-height: 110px;
+    padding: 16px;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .sim-note {
+    font-size: 11px; color: var(--fg-muted);
+    margin-top: 10px;
+    font-style: italic;
+  }
+
+  /* === BUTTONS === */
+  .btn {
+    font-size: 12px; padding: 6px 16px;
+    border-radius: 6px;
+    border: 0.5px solid var(--border);
+    background: var(--bg);
+    color: var(--fg);
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.12s ease;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  .btn.primary:hover { opacity: 0.9; }
+  .btn.primary:disabled { opacity: 0.4; }
+  .nav-row {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 0.5px solid var(--border);
+  }
+  .nav-row .step-count { font-size: 12px; color: var(--fg-muted); }
+
+  /* === GW-FLOW === */
+  .gw-flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .gw-node {
+    width: 70px; height: 36px; border-radius: 4px;
+    border: 0.5px solid var(--border);
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 500; color: var(--fg-muted);
+    transition: all 0.3s; text-align: center; padding: 0 6px;
+  }
+  .gw-node.lit { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  .gw-node.error { background: var(--red-bg); border-color: var(--red-border); color: var(--red); }
+  .gw-arrow { color: var(--node-inactive); font-size: 14px; transition: color 0.3s; }
+  .gw-arrow.lit { color: var(--accent); }
+
+  /* === OS-STATUS === */
+  .os-status {
+    font-size: 16px; font-weight: 700; color: var(--fg-muted);
+    transition: color 0.3s;
+  }
+  .os-status.accepted { color: var(--green); }
+
+  /* === MQ === */
+  .mq-container { display: flex; align-items: center; gap: 12px; width: 100%; flex-wrap: wrap; }
+  .mq-queue {
+    display: flex; gap: 4px; flex: 1; min-height: 36px;
+    border: 0.5px solid var(--border); border-radius: 4px;
+    padding: 6px; align-items: center; background: var(--bg);
+  }
+  .mq-job {
+    width: 28px; height: 24px; border-radius: 3px;
+    background: var(--accent-light);
+    border: 0.5px solid var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 8px; font-weight: 700; color: var(--accent);
+    transition: all 0.3s;
+  }
+  .mq-job.consumed { opacity: 0.2; }
+  .mq-label { font-size: 10px; color: var(--fg-muted); font-weight: 600; white-space: nowrap; }
+
+  /* === WORKER === */
+  .worker-row { display: flex; gap: 12px; width: 100%; flex-wrap: wrap; justify-content: center; }
+  .worker-box {
+    border: 0.5px solid var(--border); border-radius: 6px;
+    padding: 12px 16px; background: var(--worker-bg);
+    text-align: center; min-width: 100px; flex: 1; max-width: 160px;
+  }
+  .worker-box .res { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .worker-box .wstatus {
+    font-size: 10px; font-weight: 600; padding: 2px 8px;
+    border-radius: 100px; display: inline-block;
+    background: var(--pill-bg); color: var(--fg-muted);
+    transition: all 0.3s;
+  }
+  .worker-box .wstatus.encoding { background: var(--accent-light); color: var(--accent); }
+  .worker-box .wstatus.done { background: var(--green-bg); color: var(--green); border: 0.5px solid var(--green-border); }
+  .worker-box .wstatus.expired { opacity: 0.45; }
+  .worker-box .wbar {
+    height: 4px; border-radius: 2px; background: var(--border);
+    margin-top: 8px; overflow: hidden;
+  }
+  .worker-box .wbar-fill {
+    height: 100%; width: 0; background: var(--accent);
+    border-radius: 2px; transition: width 0.1s linear;
+  }
+  .worker-box .wbar-fill.done-bar { background: var(--green); }
+
+  /* === HEX GRID === */
+  .hex-grid { position: relative; }
+  .hex-cell {
+    position: absolute;
+    width: 56px; height: 46px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 600; color: var(--fg-muted);
+    transition: all 0.4s ease;
+    line-height: 1.3;
+  }
+  .hex-cell.rider { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  .hex-cell.neighbor { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
+  .hex-cell.driver-found { background: var(--green-bg); border-color: var(--green-border); color: var(--green); }
+
+  /* === OVERVIEW === */
+  .overview-layout { display: block; }
+  .overview-layout .diagram-col { display: none; }
+  .overview-layout .info-panel { width: 100%; }
+
+  .ov-flowchart {
+    width: 100%; border: 0.5px solid var(--border);
+    border-radius: 8px; background: var(--bg-alt);
+    padding: 20px 12px; margin-bottom: 16px;
+  }
+  .ov-flowchart svg { width: 100%; display: block; }
+  .ov-flowchart svg .fc-node { cursor: pointer; }
+  .ov-flowchart svg .fc-node rect { transition: fill 0.15s, stroke 0.15s; }
+  .ov-flowchart svg .fc-node:hover rect { fill: var(--accent); stroke: var(--accent); }
+  .ov-flowchart svg .fc-node:hover .fc-title { fill: var(--accent-fg); }
+  .ov-flowchart svg .fc-node:hover .fc-concept { fill: var(--accent-fg); opacity: 0.8; }
+  .ov-flowchart svg .fc-node:hover .fc-num { fill: var(--accent-fg); }
+
+  .ov-detail-bar {
+    border: 0.5px solid var(--border); border-radius: 6px;
+    background: var(--bg-alt); padding: 14px 18px;
+    margin-bottom: 0; min-height: 52px;
+    display: flex; align-items: flex-start; gap: 16px;
+    transition: border-color 0.2s;
+  }
+  .ov-detail-bar.has-selection { border-color: var(--accent); }
+  .ov-detail-bar .ov-detail-prompt { font-size: 13px; color: var(--fg-muted); line-height: 1.6; }
+  .ov-detail-bar .ov-detail-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 24px; height: 24px; border-radius: 100px;
+    background: var(--accent); color: var(--accent-fg);
+    font-size: 12px; font-weight: 700; flex-shrink: 0; margin-top: 1px;
+  }
+  .ov-detail-bar .ov-detail-content { flex: 1; min-width: 0; }
+  .ov-detail-bar .ov-detail-title { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+  .ov-detail-bar .ov-detail-concept { font-size: 11px; color: var(--badge-fg); font-weight: 600; }
+  .ov-detail-bar .ov-detail-desc { font-size: 13px; color: var(--fg-muted); margin-top: 6px; line-height: 1.6; }
+  .ov-detail-bar .ov-detail-link {
+    font-size: 12px; color: var(--accent); cursor: pointer; margin-top: 6px;
+    display: inline-block; font-weight: 600;
+  }
+  .ov-detail-bar .ov-detail-link:hover { text-decoration: underline; }
+
+  .ov-e2e-flow { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: center; width: 100%; }
+  .ov-e2e-node {
+    padding: 6px 10px; border-radius: 4px; font-size: 10px; font-weight: 600;
+    border: 0.5px solid var(--border); background: var(--bg);
+    color: var(--fg-muted); transition: all 0.3s; white-space: nowrap;
+  }
+  .ov-e2e-node.lit { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  .ov-e2e-node.done { background: var(--green-bg); border-color: var(--green-border); color: var(--green); }
+  .ov-e2e-arrow { color: var(--node-inactive); font-size: 12px; transition: color 0.3s; }
+  .ov-e2e-arrow.lit { color: var(--accent); }
+  .ov-e2e-status { font-size: 12px; font-weight: 600; color: var(--fg-muted); margin-left: 8px; width: 100%; text-align: center; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Ride-sharing Dispatch Pipeline <span>— System Design</span></h1>
+
+  <div class="pill-nav" id="pillNav"></div>
+
+  <div class="main">
+    <div class="diagram-col">
+      <h3>Pipeline</h3>
+      <svg id="pipelineSvg" viewBox="0 0 196 460" xmlns="http://www.w3.org/2000/svg" width="100%"></svg>
+    </div>
+    <div class="info-panel" id="infoPanel"></div>
+  </div>
+
+  <div class="sim-panel">
+    <div class="sim-header">
+      <h3 id="simTitle">Simulation</h3>
+      <button class="btn primary" id="runBtn" onclick="runSim()">Run simulation</button>
+    </div>
+    <div class="sim-area" id="simArea"></div>
+    <div class="sim-note" id="simNote"></div>
+  </div>
+
+  <div class="nav-row">
+    <button class="btn" id="prevBtn" onclick="go(-1)">← Previous</button>
+    <span class="step-count" id="stepCount"></span>
+    <button class="btn" id="nextBtn" onclick="go(1)">Next →</button>
+  </div>
+</div>
+
+<script>
+const STEPS = [
+  {
+    id: 'geo', title: 'Ride Request', pill: 'Geo Index',
+    concept: 'Geospatial Indexing',
+    explain: 'When a rider taps "Request", the app reverse-geocodes the pickup point into an H3 hex cell (level-9 ≈ 175 m across). The backend looks up all online drivers whose last-known location cell overlaps the pickup cell and its immediate ring-1 neighbours — a constant-time set lookup instead of a distance scan across millions of rows. Uber\'s H3 library (open-sourced 2018) is the reference implementation; the same index powers surge-zone computation and demand forecasting.',
+    pro: 'O(1) neighbour lookup regardless of city size. Cell granularity can be tuned — wider rings trade precision for recall. The same index is reused for surge-zone computation and heat-map rendering.',
+    con: 'Cell boundaries create artificial discontinuities: a driver 10 m away in a non-overlapping cell tier may be skipped if the ring radius is too narrow. Drivers near a cell edge appear farther than they really are to the pickup.',
+    simNote: 'Pickup geocodes into a center cell. Ring-1 neighbours activate one by one — then online drivers inside those cells are discovered.'
+  },
+  {
+    id: 'match', title: 'Driver Matching', pill: 'Matching',
+    concept: 'Multi-factor Scoring',
+    explain: 'Candidate drivers from the geo index are ranked by a weighted score: estimated ETA (from a live traffic graph), acceptance rate, car-type match, and surge multiplier. The top-k candidates receive a silent push offer simultaneously — first accept wins (optimistic dispatch). Unanswered offers time out in ~10 s and the system falls to rank k+1. Lyft calls this "top-of-funnel parallel dispatch"; the scoring vector is pre-computed per driver and cached so that ranking is just a sort at request time.',
+    pro: 'Parallelising offers to top-k minimises rider wait when the #1 candidate is busy or ignores the ping. Caching per-driver scores means ranking is O(k log k) at request time, not a live DB query.',
+    con: 'Multiple drivers see "offer pending" simultaneously, wasting attention and inflating apparent demand. An aggressive k inflates phantom acceptance signals on the driver side.',
+    simNote: 'Four candidates are scored and ranked. Offers fire in parallel — the highest-ranked driver accepts, the rest expire.'
+  },
+  {
+    id: 'dispatch', title: 'Dispatch', pill: 'WebSocket',
+    concept: 'Bidirectional Real-time Channels',
+    explain: 'Once matched, both driver and rider maintain a persistent WebSocket connection to a stateful presence server. The backend emits typed events — driver_assigned, ETA update, trip_started — that both clients receive in under 100 ms. HTTP long-polling and short-polling are avoided: they would require constant reconnects and add hundreds of milliseconds of latency per update, especially on mobile networks with high TCP setup cost.',
+    pro: 'Sub-100 ms event delivery with no client-side polling loop. A single TCP connection amortises TLS handshake cost across all events for the trip lifetime. The server can push without waiting for a client request.',
+    con: 'Stateful connections resist horizontal load-balancing — each server node must track which socket maps to which session. A rolling deploy triggers a reconnect storm that can spike backend CPU for 30–60 s.',
+    simNote: 'A persistent channel opens between rider, server, and driver. Typed events push in real time — no polling required.'
+  },
+  {
+    id: 'tracking', title: 'Live Tracking', pill: 'Streaming',
+    concept: 'Event Streaming (Kafka)',
+    explain: 'The driver app emits a GPS ping every 4 seconds. Each ping is published to a Kafka topic partitioned by trip_id and consumed by three independent services: (a) the map service, which animates the driver dot; (b) an ETA recalculator that adjusts for live traffic; and (c) a trip recorder that writes to a time-series store for post-trip replay and fraud analysis. Fan-out via topic subscriptions means new consumers can be added without any changes to the driver app producer.',
+    pro: 'Fully decoupled fan-out — a new consumer (safety monitoring, live traffic inference) requires zero changes to the driver app. The time-series store enables trip replay, dispute resolution, and audit trails.',
+    con: '4 s × millions of active trips = enormous write throughput. Consumers must handle out-of-order events (GPS can lag on tunnels). Storage costs compound fast across retention windows and replay topics.',
+    simNote: 'GPS pings enter the Kafka topic. Three independent consumers — map, ETA recalculator, and recorder — each process the same events without coupling.'
+  },
+  {
+    id: 'payment', title: 'Payment', pill: 'Idempotency',
+    concept: 'Idempotent Charges',
+    explain: 'At trip end, the fare engine calculates cost (base + time-rate × minutes + distance-rate × km + surge). A charge request is sent to the payment processor with an idempotency key equal to the trip_id. If the network drops after the charge succeeds but before the ACK arrives, the client retries with the same key — the processor deduplicates and returns the original result. Driver earnings are credited via an async ledger write, not a blocking synchronous DB transaction, keeping the critical charge path fast.',
+    pro: 'Idempotency keys make retries unconditionally safe — no double-charges even under repeated network failures. The async ledger write keeps the charge path below 200 ms p99 even during peak surge.',
+    con: 'Driver earnings are eventually consistent — the balance may lag seconds to minutes behind the confirmed charge. Disputes require reconciling the processor\'s ledger of truth against the internal ledger.',
+    simNote: 'A charge fires but the network drops mid-flight. The retry carries the same idempotency key — the processor returns the cached result, preventing a double-charge.'
+  },
+  {
+    id: 'rating', title: 'Rating', pill: 'CQRS',
+    concept: 'CQRS + Read Model',
+    explain: 'After the trip, rider and driver each submit a rating. Each write appends an immutable event to an event log. A separate read-model projector asynchronously aggregates the rolling average and writes it to a Redis key (driver:{id}:rating). The matching service reads only the Redis value — it never touches the raw log. This is CQRS: write model (event log) and read model (Redis) are separate stores, each optimised for its own access pattern.',
+    pro: 'The read model is pre-aggregated — O(1) lookup for any driver\'s rating with no GROUP BY at query time. The event log is append-only and provides a complete, auditable history of every rating ever submitted.',
+    con: 'The read model is stale until the projector catches up — typically seconds, but under load it can lag further. A projector bug can silently corrupt the read model; rebuilding it requires replaying the full event log.',
+    simNote: 'Rating events append to the immutable log. The projector consumes them asynchronously and updates the Redis read model — the matching service reads only the Redis key, never the log directly.'
+  }
+];
+
+let current = -1;
+let simRunning = false;
+let simTimers = [];
+
+function clearTimers() { simTimers.forEach(t => clearTimeout(t)); simTimers = []; simRunning = false; }
+function isOverview() { return current === -1; }
+
+function render() {
+  clearTimers();
+  const mainEl = document.querySelector('.main');
+
+  // Pills
+  document.getElementById('pillNav').innerHTML =
+    `<div class="pill${isOverview() ? ' active' : ''}" onclick="goTo(-1)">Overview</div>` +
+    STEPS.map((st, i) =>
+      `<div class="pill${i === current ? ' active' : ''}" onclick="goTo(${i})">${st.pill}</div>`
+    ).join('');
+
+  if (isOverview()) {
+    mainEl.classList.add('overview-layout');
+    mainEl.style.display = 'block';
+    document.getElementById('pipelineSvg').parentElement.style.display = 'none';
+
+    const summaries = [
+      'Reverse-geocodes pickup into H3 hex cell; ring-1 set lookup finds nearby drivers in O(1)',
+      'Scores candidates by ETA, acceptance rate, car type; sends parallel offers to top-k drivers',
+      'Persistent WebSocket pushes typed events to rider and driver in under 100 ms',
+      'GPS pings published to Kafka; fan-out to map service, ETA recalculator, and trip recorder',
+      'Charge sent with idempotency key = trip_id; retries are safe — no double-charges possible',
+      'Ratings append to event log; projector asynchronously updates Redis read model'
+    ];
+    const icons = ['📍','🎯','📡','🗺','💳','⭐'];
+    const concepts = STEPS.map(s => s.concept);
+
+    const bw = 150, bh = 64, gapX = 30, gapY = 24;
+    const cols = 3;
+    const padX = 16, padY = 16;
+    const svgW = cols * bw + (cols - 1) * gapX + padX * 2;
+    const svgH = 2 * bh + gapY + padY * 2 + 20;
+
+    let svgContent = '';
+    const positions = [];
+    for (let i = 0; i < 6; i++) {
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+      const x = padX + col * (bw + gapX);
+      const y = padY + row * (bh + gapY + 20);
+      positions.push({ x, y, cx: x + bw / 2, cy: y + bh / 2 });
+    }
+
+    for (let i = 0; i < 5; i++) {
+      const from = positions[i];
+      const to = positions[i + 1];
+      if (Math.floor(i / cols) === Math.floor((i + 1) / cols)) {
+        const x1 = from.x + bw + 2;
+        const x2 = to.x - 2;
+        const y = from.cy;
+        svgContent += `<line x1="${x1}" y1="${y}" x2="${x2 - 5}" y2="${y}" stroke="var(--border)" stroke-width="1"/>`;
+        svgContent += `<polygon points="${x2 - 7},${y - 4} ${x2 - 7},${y + 4} ${x2},${y}" fill="var(--border)"/>`;
+      } else {
+        const x1 = from.cx;
+        const y1 = from.y + bh + 2;
+        const x2 = to.cx;
+        const y2 = to.y - 2;
+        const midY = y1 + (y2 - y1) / 2;
+        svgContent += `<path d="M${x1},${y1} L${x1},${midY} L${x2},${midY} L${x2},${y2 - 5}" stroke="var(--border)" stroke-width="1" fill="none"/>`;
+        svgContent += `<polygon points="${x2 - 4},${y2 - 7} ${x2 + 4},${y2 - 7} ${x2},${y2}" fill="var(--border)"/>`;
+      }
+    }
+
+    for (let i = 0; i < 6; i++) {
+      const p = positions[i];
+      svgContent += `<g class="fc-node" onclick="ovSelect(${i})" data-idx="${i}">
+        <rect x="${p.x}" y="${p.y}" width="${bw}" height="${bh}" rx="6"
+          fill="var(--node-inactive)" stroke="var(--border)" stroke-width="0.5"/>
+        <text class="fc-num" x="${p.x + 12}" y="${p.y + 18}" font-size="10" font-weight="700"
+          fill="var(--node-inactive-text)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">${icons[i]}</text>
+        <text class="fc-title" x="${p.x + 24}" y="${p.y + 18}" font-size="11" font-weight="700"
+          fill="var(--node-inactive-text)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">${STEPS[i].title}</text>
+        <text class="fc-concept" x="${p.x + bw / 2}" y="${p.y + 38}" text-anchor="middle" font-size="9" font-weight="500"
+          fill="var(--node-inactive-text)" opacity="0.7" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">${concepts[i]}</text>
+        <text x="${p.x + bw / 2}" y="${p.y + 54}" text-anchor="middle" font-size="10" font-weight="600"
+          fill="var(--node-inactive-text)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">${i + 1} / 6</text>
+      </g>`;
+    }
+
+    document.getElementById('infoPanel').innerHTML = `
+      <div class="badge">End-to-End Architecture</div>
+      <h2>Pipeline Overview</h2>
+      <p class="explain" style="margin-bottom:14px">Click any stage in the flowchart to preview it, or double-click to jump into the deep dive.</p>
+      <div class="ov-flowchart">
+        <svg viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg" id="ovFlowSvg"></svg>
+      </div>
+      <div class="ov-detail-bar" id="ovDetailBar">
+        <div class="ov-detail-prompt">Click a stage above to see details here</div>
+      </div>
+    `;
+    document.getElementById('ovFlowSvg').innerHTML = svgContent;
+    document.querySelectorAll('.fc-node').forEach(node => {
+      node.addEventListener('dblclick', () => { goTo(parseInt(node.dataset.idx)); });
+    });
+    window._ovSummaries = summaries;
+
+    document.getElementById('simTitle').textContent = 'Simulation — End-to-End Flow';
+    document.getElementById('simNote').textContent = 'Watch a ride request flow through all six pipeline stages sequentially.';
+    document.getElementById('simArea').innerHTML = buildSimHTML(-1);
+    document.getElementById('runBtn').disabled = false;
+
+    document.getElementById('prevBtn').disabled = true;
+    document.getElementById('nextBtn').disabled = false;
+    document.getElementById('stepCount').textContent = 'Overview';
+    return;
+  }
+
+  // Normal step view
+  mainEl.classList.remove('overview-layout');
+  mainEl.style.display = '';
+  document.getElementById('pipelineSvg').parentElement.style.display = '';
+  const s = STEPS[current];
+
+  renderPipeline();
+
+  document.getElementById('infoPanel').innerHTML = `
+    <div class="badge">${s.concept}</div>
+    <h2>${s.title}</h2>
+    <p class="explain">${s.explain}</p>
+    <div class="tradeoff-row">
+      <div class="tradeoff-card pro"><h4>✓ Why it works</h4>${s.pro}</div>
+      <div class="tradeoff-card con"><h4>✗ The tradeoff</h4>${s.con}</div>
+    </div>
+  `;
+
+  document.getElementById('simTitle').textContent = `Simulation — ${s.title}`;
+  document.getElementById('simNote').textContent = s.simNote;
+  document.getElementById('simArea').innerHTML = buildSimHTML(current);
+  document.getElementById('runBtn').disabled = false;
+
+  document.getElementById('prevBtn').disabled = false;
+  document.getElementById('nextBtn').disabled = current === STEPS.length - 1;
+  document.getElementById('stepCount').textContent = `${current + 1} / ${STEPS.length}`;
+}
+
+function renderPipeline() {
+  const svg = document.getElementById('pipelineSvg');
+  const labels = ['Ride Request','Driver Match','Dispatch','Live Tracking','Payment','Rating'];
+  const icons = ['📍','🎯','📡','🗺','💳','⭐'];
+  let html = '';
+  const yStart = 16, gap = 76, boxW = 164, boxH = 44, cx = 98;
+  for (let i = 0; i < 6; i++) {
+    const y = yStart + i * gap;
+    const active = i === current;
+    const fill = active ? 'var(--accent)' : 'var(--node-inactive)';
+    const textFill = active ? 'var(--accent-fg)' : 'var(--node-inactive-text)';
+    const strokeW = active ? 1.5 : 0.5;
+    html += `<rect x="${cx - boxW/2}" y="${y}" width="${boxW}" height="${boxH}" rx="6"
+      fill="${fill}" stroke="${active ? 'var(--accent)' : 'var(--border)'}" stroke-width="${strokeW}"/>`;
+    html += `<text x="${cx}" y="${y + 27}" text-anchor="middle"
+      font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif"
+      font-size="12" font-weight="${active ? 700 : 500}" fill="${textFill}">${icons[i]} ${labels[i]}</text>`;
+    if (i < 5) {
+      const ay = y + boxH + 4;
+      html += `<line x1="${cx}" y1="${ay}" x2="${cx}" y2="${ay + gap - boxH - 8}"
+        stroke="${i === current || i + 1 === current ? 'var(--accent)' : 'var(--border)'}"
+        stroke-width="0.5" stroke-dasharray="${i === current || i + 1 === current ? 'none' : '3,3'}"/>`;
+      html += `<polygon points="${cx - 4},${ay + gap - boxH - 12} ${cx + 4},${ay + gap - boxH - 12} ${cx},${ay + gap - boxH - 6}"
+        fill="${i === current || i + 1 === current ? 'var(--accent)' : 'var(--border)'}"/>`;
+    }
+  }
+  svg.innerHTML = html;
+}
+
+function buildSimHTML(step) {
+  if (step === -1) {
+    const names = ['Geo Index','Matching','Dispatch','Tracking','Payment','Rating'];
+    return `<div class="ov-e2e-flow">
+      ${names.map((n, i) =>
+        `<div class="ov-e2e-node" id="oe${i}">${n}</div>${i < 5 ? '<span class="ov-e2e-arrow" id="oea' + i + '">→</span>' : ''}`
+      ).join('')}
+      <div class="ov-e2e-status" id="oeStatus">Ready</div>
+    </div>`;
+  }
+  switch (step) {
+    case 0: {
+      // Hex grid: index 0=center, 1=top, 2=top-right, 3=bottom-right, 4=bottom, 5=bottom-left, 6=top-left
+      const pos = [
+        {l:82, t:72},   // 0 center
+        {l:82, t:12},   // 1 top
+        {l:146, t:42},  // 2 top-right
+        {l:146, t:102}, // 3 bottom-right
+        {l:82, t:132},  // 4 bottom
+        {l:18, t:102},  // 5 bottom-left
+        {l:18, t:42},   // 6 top-left
+      ];
+      const cells = pos.map((p, i) =>
+        `<div class="hex-cell" id="hc${i}" style="left:${p.l}px;top:${p.t}px">${i === 0 ? '📍' : '·'}</div>`
+      ).join('');
+      return `<div style="display:flex;flex-direction:column;align-items:center;gap:14px">
+        <div class="hex-grid" style="width:220px;height:190px">${cells}</div>
+        <div style="font-size:11px;color:var(--fg-muted)" id="geoStatus">Indexing pickup location…</div>
+      </div>`;
+    }
+    case 1: {
+      const drivers = [
+        {name:'Priya S.', eta:'ETA 3 min', score:94},
+        {name:'Marcus L.', eta:'ETA 5 min', score:88},
+        {name:'Yuna K.', eta:'ETA 6 min', score:81},
+        {name:'Devon R.', eta:'ETA 7 min', score:76},
+      ];
+      return `<div style="display:flex;flex-direction:column;gap:10px;width:100%">
+        <div class="worker-row">
+          ${drivers.map((d, i) => `<div class="worker-box" id="drv${i}">
+            <div class="res" style="font-size:12px">🚗 ${d.name}</div>
+            <div style="font-size:9px;color:var(--fg-muted);margin:2px 0">${d.eta} · score: ${d.score}</div>
+            <span class="wstatus" id="ds${i}">ranked #${i + 1}</span>
+          </div>`).join('')}
+        </div>
+        <div style="font-size:11px;text-align:center;color:var(--fg-muted)" id="matchStatus">Scoring candidates…</div>
+      </div>`;
+    }
+    case 2: {
+      return `<div style="display:flex;flex-direction:column;gap:12px;width:100%;align-items:center">
+        <div class="gw-flow">
+          <div class="gw-node" id="ws0" style="min-width:76px">Rider App</div>
+          <span class="gw-arrow" id="wsa0">⇄</span>
+          <div class="gw-node" id="ws1" style="min-width:90px">Presence Server</div>
+          <span class="gw-arrow" id="wsa1">⇄</span>
+          <div class="gw-node" id="ws2" style="min-width:76px">Driver App</div>
+        </div>
+        <div style="min-height:28px;display:flex;align-items:center;justify-content:center">
+          <div id="wsEvent" style="padding:4px 14px;border-radius:4px;font-size:11px;font-weight:600;background:var(--accent-light);color:var(--accent);border:0.5px solid var(--accent);transition:opacity 0.3s;opacity:0"></div>
+        </div>
+        <div style="font-size:11px;color:var(--fg-muted)" id="wsStatus">Establishing connection…</div>
+      </div>`;
+    }
+    case 3: {
+      return `<div style="display:flex;flex-direction:column;gap:12px;width:100%">
+        <div class="mq-container">
+          <span class="mq-label">GPS ping →</span>
+          <div class="mq-queue" id="kfQueue"></div>
+          <span class="mq-label">Kafka topic</span>
+          <span style="font-size:11px;color:var(--fg-muted)" id="kfStatus">Ready</span>
+        </div>
+        <div class="worker-row">
+          ${[['🗺','Map','animate dot'],['⏱','ETA','recalculate'],['💾','Recorder','write TS']].map(([ic, name, sub], i) => `
+            <div class="worker-box" id="kfc${i}" style="max-width:140px">
+              <div class="res">${ic} ${name}</div>
+              <div style="font-size:9px;color:var(--fg-muted);margin:2px 0">${sub}</div>
+              <span class="wstatus" id="kfs${i}">waiting</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+    }
+    case 4: {
+      return `<div style="display:flex;flex-direction:column;gap:12px;width:100%;align-items:center">
+        <div class="gw-flow" style="flex-wrap:wrap">
+          <div class="gw-node" id="py0" style="min-width:84px">Fare Engine</div>
+          <span class="gw-arrow" id="pya0">→</span>
+          <div class="gw-node" id="py1">Network</div>
+          <span class="gw-arrow" id="pya1">→</span>
+          <div class="gw-node" id="py2">Stripe</div>
+          <span class="gw-arrow" id="pya2">→</span>
+          <div class="gw-node" id="py3">Ledger</div>
+        </div>
+        <div style="font-size:11px;font-weight:600;min-height:18px;text-align:center;transition:color 0.3s" id="pyMsg"></div>
+        <div class="os-status" id="pyStatus" style="display:block;text-align:center;font-size:14px">…</div>
+      </div>`;
+    }
+    case 5: {
+      return `<div style="display:flex;flex-direction:column;gap:10px;width:100%">
+        <div style="display:flex;align-items:flex-start;gap:12px;width:100%;flex-wrap:wrap;justify-content:center">
+          <div style="flex:1;min-width:130px;max-width:190px">
+            <div style="font-size:9px;color:var(--fg-muted);font-weight:600;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:6px">Event Log</div>
+            <div id="cqrsLog" style="border:0.5px solid var(--border);border-radius:4px;padding:8px;min-height:80px;background:var(--bg);font-size:10px;font-family:monospace;line-height:2"></div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding-top:28px;gap:6px">
+            <div class="gw-node" id="cqrsProj" style="width:76px;font-size:9px;text-align:center">Projector</div>
+            <div style="font-size:9px;color:var(--fg-muted)" id="cqrsProjStatus">idle</div>
+          </div>
+          <div style="flex:1;min-width:130px;max-width:190px">
+            <div style="font-size:9px;color:var(--fg-muted);font-weight:600;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:6px">Redis Read Model</div>
+            <div style="border:0.5px solid var(--border);border-radius:4px;padding:14px;background:var(--bg);text-align:center">
+              <div style="font-size:9px;color:var(--fg-muted);margin-bottom:4px">driver:X42:rating</div>
+              <div style="font-size:28px;font-weight:700;transition:color 0.3s;color:var(--fg-muted)" id="cqrsVal">—</div>
+            </div>
+          </div>
+        </div>
+        <div style="font-size:11px;text-align:center;color:var(--fg-muted)" id="cqrsStatus">Waiting for ratings…</div>
+      </div>`;
+    }
+  }
+}
+
+function runSim() {
+  clearTimers();
+  simRunning = true;
+  document.getElementById('runBtn').disabled = true;
+  document.getElementById('simArea').innerHTML = buildSimHTML(current);
+
+  switch (current) {
+    case -1: simOverview(); break;
+    case 0: simGeoIndex(); break;
+    case 1: simDriverMatch(); break;
+    case 2: simDispatch(); break;
+    case 3: simTracking(); break;
+    case 4: simPayment(); break;
+    case 5: simRating(); break;
+  }
+}
+
+function ovSelect(idx) {
+  document.querySelectorAll('.fc-node rect').forEach((r, i) => {
+    if (i === idx) {
+      r.setAttribute('fill', 'var(--accent)');
+      r.setAttribute('stroke', 'var(--accent)');
+      r.setAttribute('stroke-width', '1.5');
+    } else {
+      r.setAttribute('fill', 'var(--node-inactive)');
+      r.setAttribute('stroke', 'var(--border)');
+      r.setAttribute('stroke-width', '0.5');
+    }
+  });
+  document.querySelectorAll('.fc-node .fc-title').forEach((t, i) => {
+    t.setAttribute('fill', i === idx ? 'var(--accent-fg)' : 'var(--node-inactive-text)');
+  });
+  document.querySelectorAll('.fc-node .fc-concept').forEach((t, i) => {
+    t.setAttribute('fill', i === idx ? 'var(--accent-fg)' : 'var(--node-inactive-text)');
+  });
+  document.querySelectorAll('.fc-node .fc-num').forEach((t, i) => {
+    t.setAttribute('fill', i === idx ? 'var(--accent-fg)' : 'var(--node-inactive-text)');
+  });
+  document.querySelectorAll('.fc-node').forEach((g, i) => {
+    const texts = g.querySelectorAll('text');
+    if (texts[3]) texts[3].setAttribute('fill', i === idx ? 'var(--accent-fg)' : 'var(--node-inactive-text)');
+  });
+
+  const s = STEPS[idx];
+  const bar = document.getElementById('ovDetailBar');
+  bar.classList.add('has-selection');
+  bar.innerHTML = `
+    <span class="ov-detail-num">${idx + 1}</span>
+    <div class="ov-detail-content">
+      <div class="ov-detail-title">${s.title}</div>
+      <div class="ov-detail-concept">${s.concept}</div>
+      <div class="ov-detail-desc">${window._ovSummaries[idx]}</div>
+      <span class="ov-detail-link" onclick="goTo(${idx})">Deep dive →</span>
+    </div>
+  `;
+}
+
+function simOverview() {
+  const names = [
+    'Indexing hex cells…', 'Scoring drivers…', 'Opening WebSocket…',
+    'Streaming GPS pings…', 'Charging fare…', 'Updating rating…'
+  ];
+  for (let i = 0; i < 6; i++) {
+    simTimers.push(setTimeout(() => {
+      const node = document.getElementById(`oe${i}`);
+      const status = document.getElementById('oeStatus');
+      if (node) node.classList.add('lit');
+      if (i > 0) {
+        const arrow = document.getElementById(`oea${i - 1}`);
+        if (arrow) arrow.classList.add('lit');
+      }
+      if (status) status.textContent = names[i];
+    }, i * 900));
+    simTimers.push(setTimeout(() => {
+      const node = document.getElementById(`oe${i}`);
+      const status = document.getElementById('oeStatus');
+      if (node) { node.classList.remove('lit'); node.classList.add('done'); }
+      if (i === 5 && status) status.textContent = '✓ Ride complete — end-to-end pipeline done';
+    }, i * 900 + 600));
+  }
+}
+
+function simGeoIndex() {
+  const status = document.getElementById('geoStatus');
+  // Light center (rider pickup)
+  simTimers.push(setTimeout(() => {
+    const c = document.getElementById('hc0');
+    if (c) { c.classList.add('rider'); c.innerHTML = '📍<span style="font-size:8px">pickup</span>'; }
+    if (status) status.textContent = 'Pickup → H3 cell C6A2 found';
+  }, 300));
+  // Light ring-1 neighbours one by one
+  for (let i = 1; i <= 6; i++) {
+    simTimers.push(setTimeout(() => {
+      const c = document.getElementById(`hc${i}`);
+      if (c) { c.classList.add('neighbor'); c.textContent = 'ring-1'; }
+      if (status) status.textContent = `Ring-1: ${i}/6 cells indexed`;
+    }, 300 + i * 320));
+  }
+  // Drivers found in two neighbour cells
+  simTimers.push(setTimeout(() => {
+    const c = document.getElementById('hc2');
+    if (c) { c.classList.remove('neighbor'); c.classList.add('driver-found'); c.innerHTML = '🚗<span style="font-size:8px">online</span>'; }
+    if (status) status.textContent = '1 driver found in ring-1';
+  }, 300 + 6 * 320 + 350));
+  simTimers.push(setTimeout(() => {
+    const c = document.getElementById('hc5');
+    if (c) { c.classList.remove('neighbor'); c.classList.add('driver-found'); c.innerHTML = '🚗<span style="font-size:8px">online</span>'; }
+    if (status) status.textContent = '✓ 2 drivers found — O(1) lookup complete';
+  }, 300 + 6 * 320 + 700));
+}
+
+function simDriverMatch() {
+  const status = document.getElementById('matchStatus');
+  // Send parallel offers
+  simTimers.push(setTimeout(() => {
+    for (let i = 0; i < 4; i++) {
+      const ds = document.getElementById(`ds${i}`);
+      if (ds) { ds.textContent = 'offer sent →'; ds.classList.add('encoding'); }
+    }
+    if (status) status.textContent = 'Offers sent to top-4 in parallel…';
+  }, 600));
+  // Highest-ranked driver accepts
+  simTimers.push(setTimeout(() => {
+    const ds0 = document.getElementById('ds0');
+    if (ds0) { ds0.textContent = 'Accepted ✓'; ds0.classList.remove('encoding'); ds0.classList.add('done'); }
+    if (status) status.textContent = 'Driver #1 accepted — dispatching';
+  }, 1900));
+  // Others expire
+  simTimers.push(setTimeout(() => {
+    for (let i = 1; i < 4; i++) {
+      const ds = document.getElementById(`ds${i}`);
+      if (ds) { ds.textContent = 'Expired'; ds.classList.remove('encoding'); ds.classList.add('expired'); }
+    }
+    if (status) status.textContent = '✓ Match complete — Priya S., ETA 3 min';
+  }, 2300));
+}
+
+function simDispatch() {
+  const status = document.getElementById('wsStatus');
+  // Open connection: rider side
+  simTimers.push(setTimeout(() => {
+    const ws0 = document.getElementById('ws0');
+    if (ws0) ws0.classList.add('lit');
+    if (status) status.textContent = 'Opening WebSocket connection…';
+  }, 200));
+  // Full channel open
+  simTimers.push(setTimeout(() => {
+    ['wsa0', 'ws1', 'wsa1', 'ws2'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('lit');
+    });
+    if (status) status.textContent = 'Persistent channel established';
+  }, 700));
+  // Typed events flow
+  const events = [
+    { t: 1200, label: 'driver_assigned' },
+    { t: 1900, label: 'ETA: 3 min' },
+    { t: 2600, label: 'location_update' },
+    { t: 3300, label: 'trip_started' },
+  ];
+  events.forEach(({ t, label }) => {
+    simTimers.push(setTimeout(() => {
+      const ev = document.getElementById('wsEvent');
+      if (ev) { ev.textContent = label; ev.style.opacity = '1'; }
+      if (status) status.textContent = `Event pushed: ${label}`;
+    }, t));
+    simTimers.push(setTimeout(() => {
+      const ev = document.getElementById('wsEvent');
+      if (ev) ev.style.opacity = '0';
+    }, t + 500));
+  });
+  simTimers.push(setTimeout(() => {
+    if (status) status.textContent = '✓ Real-time channel active — <100 ms latency';
+  }, 3800));
+}
+
+function simTracking() {
+  const queue = document.getElementById('kfQueue');
+  const kfStatus = document.getElementById('kfStatus');
+  const pingCount = 6;
+  // Fill queue with GPS pings
+  for (let i = 0; i < pingCount; i++) {
+    simTimers.push(setTimeout(() => {
+      if (!queue) return;
+      const j = document.createElement('div');
+      j.className = 'mq-job';
+      j.id = `kfp${i}`;
+      j.textContent = `P${i + 1}`;
+      queue.appendChild(j);
+      if (kfStatus) kfStatus.textContent = `Ping ${i + 1}/${pingCount} received`;
+    }, i * 280));
+  }
+  // Each consumer processes independently
+  const consumers = [
+    { sid: 'kfs0', processing: 'rendering…', done: 'map updated ✓' },
+    { sid: 'kfs1', processing: 'recalc…',    done: 'ETA: 2 min ✓' },
+    { sid: 'kfs2', processing: 'writing…',   done: 'stored ✓' },
+  ];
+  consumers.forEach(({ sid, processing, done }, idx) => {
+    simTimers.push(setTimeout(() => {
+      const ws = document.getElementById(sid);
+      if (ws) { ws.textContent = processing; ws.classList.add('encoding'); }
+    }, pingCount * 280 + 300 + idx * 200));
+    simTimers.push(setTimeout(() => {
+      const ws = document.getElementById(sid);
+      if (ws) { ws.textContent = done; ws.classList.remove('encoding'); ws.classList.add('done'); }
+      for (let i = 0; i < pingCount; i++) {
+        const p = document.getElementById(`kfp${i}`);
+        if (p) p.classList.add('consumed');
+      }
+      if (idx === 2 && kfStatus) kfStatus.textContent = '✓ All consumers updated — fan-out complete';
+    }, pingCount * 280 + 900 + idx * 300));
+  });
+}
+
+function simPayment() {
+  const status = document.getElementById('pyStatus');
+  const msg = document.getElementById('pyMsg');
+  // Fare calculated
+  simTimers.push(setTimeout(() => {
+    const py0 = document.getElementById('py0');
+    if (py0) py0.classList.add('lit');
+    if (status) status.textContent = 'Fare: $12.40 (base + 8 km + surge 1.2×)';
+  }, 300));
+  // Charge dispatched
+  simTimers.push(setTimeout(() => {
+    ['pya0', 'py1'].forEach(id => { const el = document.getElementById(id); if (el) el.classList.add('lit'); });
+    if (msg) msg.textContent = 'Charge sent · key: trip_7f3a91';
+  }, 900));
+  // Network drop
+  simTimers.push(setTimeout(() => {
+    const py1 = document.getElementById('py1');
+    const pya0 = document.getElementById('pya0');
+    if (py1) { py1.classList.remove('lit'); py1.classList.add('error'); }
+    if (pya0) pya0.classList.remove('lit');
+    if (msg) { msg.style.color = 'var(--red)'; msg.textContent = '⚠ Network dropped — ACK not received'; }
+    if (status) status.textContent = 'Retrying with same idempotency key…';
+  }, 1500));
+  // Retry
+  simTimers.push(setTimeout(() => {
+    const py1 = document.getElementById('py1');
+    const pya0 = document.getElementById('pya0');
+    if (py1) { py1.classList.remove('error'); py1.classList.add('lit'); }
+    if (pya0) pya0.classList.add('lit');
+    if (msg) { msg.style.color = ''; msg.textContent = 'Retry · same key: trip_7f3a91'; }
+    if (status) status.textContent = '…';
+  }, 2500));
+  // Stripe deduplication
+  simTimers.push(setTimeout(() => {
+    ['pya1', 'py2'].forEach(id => { const el = document.getElementById(id); if (el) el.classList.add('lit'); });
+    if (msg) msg.textContent = 'Stripe: duplicate key → returning cached result';
+  }, 3100));
+  // Ledger credited
+  simTimers.push(setTimeout(() => {
+    ['pya2', 'py3'].forEach(id => { const el = document.getElementById(id); if (el) el.classList.add('lit'); });
+    if (msg) msg.textContent = '';
+    if (status) { status.textContent = '✓ $12.40 charged — no double-charge'; status.classList.add('accepted'); }
+  }, 3800));
+}
+
+function simRating() {
+  const log = document.getElementById('cqrsLog');
+  const proj = document.getElementById('cqrsProj');
+  const projStatus = document.getElementById('cqrsProjStatus');
+  const val = document.getElementById('cqrsVal');
+  const status = document.getElementById('cqrsStatus');
+
+  // Append rating events to the log
+  const logEntries = [
+    { t: 300,  text: 'rating:5 (rider→driver)' },
+    { t: 900,  text: 'rating:4 (rider→driver)' },
+    { t: 1500, text: 'rating:5 (rider→driver)' },
+  ];
+  logEntries.forEach(({ t, text }) => {
+    simTimers.push(setTimeout(() => {
+      if (log) log.innerHTML += `<div>${text}</div>`;
+      if (status) status.textContent = `Event appended: ${text}`;
+    }, t));
+  });
+
+  // Projector wakes and aggregates
+  simTimers.push(setTimeout(() => {
+    if (proj) proj.classList.add('lit');
+    if (projStatus) projStatus.textContent = 'aggregating…';
+    if (status) status.textContent = 'Projector processing event log…';
+  }, 2100));
+  simTimers.push(setTimeout(() => {
+    if (val) { val.textContent = '4.7'; val.style.color = 'var(--accent)'; }
+    if (proj) proj.classList.remove('lit');
+    if (projStatus) projStatus.textContent = 'idle';
+  }, 2700));
+
+  // Another rating event
+  simTimers.push(setTimeout(() => {
+    if (log) log.innerHTML += `<div>rating:5 (driver→rider)</div>`;
+    if (status) status.textContent = 'New rating event appended';
+  }, 3300));
+
+  // Projector re-runs
+  simTimers.push(setTimeout(() => {
+    if (proj) proj.classList.add('lit');
+    if (projStatus) projStatus.textContent = 'aggregating…';
+  }, 3800));
+  simTimers.push(setTimeout(() => {
+    if (val) val.textContent = '4.8';
+    if (proj) proj.classList.remove('lit');
+    if (projStatus) projStatus.textContent = 'idle';
+    if (status) status.textContent = '✓ Read model updated — O(1) lookup from Redis';
+  }, 4400));
+}
+
+function goTo(i) { current = i; render(); }
+function go(d) { current = Math.max(-1, Math.min(STEPS.length - 1, current + d)); render(); }
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight' && current < STEPS.length - 1) go(1);
+  if (e.key === 'ArrowLeft' && current > -1) go(-1);
+});
+
+render();
+</script>
+</body>
+</html>
